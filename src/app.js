@@ -7,6 +7,7 @@ const config = require('./config');
 const logger = require('./utils/logger');
 const requestId = require('./middleware/requestId');
 const errorHandler = require('./middleware/errorHandler');
+const applicationRoutes = require('./routes/applications.routes');
 
 const app = express();
 
@@ -29,6 +30,10 @@ app.use((req, res, next) => {
   req.userId = '00000000-0000-0000-0000-000000000001';
   next();
 });
+
+// Routes (AFTER fake user)
+app.use('/api/v1/applications', applicationRoutes);
+
 
 // --- Routes ---
 app.get('/health', (req, res) => {
