@@ -8,6 +8,7 @@ const logger = require('./utils/logger');
 const requestId = require('./middleware/requestId');
 const errorHandler = require('./middleware/errorHandler');
 const applicationRoutes = require('./routes/applications.routes');
+const statsRoutes = require("./routes/stats.routes");
 
 const app = express();
 
@@ -33,6 +34,7 @@ app.use((req, res, next) => {
 
 // Routes (AFTER fake user)
 app.use('/api/v1/applications', applicationRoutes);
+app.use('/api/v1/stats', statsRoutes);
 
 
 // --- Routes ---
