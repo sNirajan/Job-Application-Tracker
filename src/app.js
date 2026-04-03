@@ -9,6 +9,8 @@ const requestId = require('./middleware/requestId');
 const errorHandler = require('./middleware/errorHandler');
 const applicationRoutes = require('./routes/applications.routes');
 const statsRoutes = require("./routes/stats.routes");
+const authRoutes = require("./routes/auth.routes");
+const auth = require("./middleware/auth");
 
 const app = express();
 
@@ -25,24 +27,20 @@ if (!config.isTest) {
   }));
 }
 
-// --- TEMPORARY: Fake user for Phase 1 ---
-// Phase 2 replaces this with real JWT auth middleware.
-app.use((req, res, next) => {
-  req.userId = '00000000-0000-0000-0000-000000000001';
-  next();
-});
-
-// Routes (AFTER fake user)
-app.use('/api/v1/applications', applicationRoutes);
-app.use('/api/v1/stats', statsRoutes);
-
-
-// --- Routes ---
+// --- Public Routes (no token needed) ---
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
-// todo: register application routes here in the next step
+app.use('/api/v1/auth', authRoutes);
+
+// --- Protected Routes (token required) ---
+// auth middleware runs BEFORE these routes, verifies the JWT,
+// and sets req.userId. If the token is missing or invalid,
+// the request never reaches these routes — it gets a 401.
+app.use('/api/v1/applications', auth, applicationRoutes);
+app.use('/api/v1/stats', auth, statsRoutes);
+
 
 // --- 404 handler ---
 app.use((req, res) => {
