@@ -1,0 +1,95 @@
+name: CI
+# WHEN it runs?
+# "on push to main" = every time code lands on main
+# "on pull_request to main" = every time someone opens a PR targeting main
+# This is the standard trigger setup.
+# A workflow has "jobs". Each job runs on its own virtual machine.
+# We have one job called "test"
+
+# Which operating system? ubuntu-latest
+
+# Health check: wait until PostgreSQL is actually ready
+# before running tests. Without this, tests might start
+# before the database is accepting connections.
+
+# Environment variables available to all steps below.
+# These are the CI equivalents of our .env file.
+# These are NOT secrets. Test credentials don't need to be hidden.
+# For production deployments, we can use GitHub Secrets instead.
+
+# Steps run in order, top to bottom. If any step fails,
+# all remaining steps are skipped and the job fails.
+
+    # Step 1: Downloads our code onto the virtual machine
+      # actions/checkout is an official github action used
+
+    # Step 2: Installs Node.js
+      # 'cache: npm' saves our node_modules between runs
+      # so npm install doesn't re-download everything every time
+
+    # Step 3: Installs dependencies
+      # "npm ci" is like "npm install" but stricter:
+      # Uses package-lock.json exactly (no version surprises)
+      # It's faster (skips some checks)
+      # It fails if package-lock.json is out of sync with package.json
+
+    # Step 4: Creates the database tables
+
+      # Step 5: Runs all tests
+      # If any test fails, this step fails, the job fails
+      # and the PR gets a red X
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+   
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: job_tracker_test
+        ports: 
+            - 5432:5432
+    
+        options: >-
+            --health-cmd pg_isready
+            --health-interval 10s
+            --health-timeout 5s
+            --health-retries 5  
+
+    env:
+        NODE_ENV: test
+        DB_HOST: localhost
+        DB_PORT: 5432
+        DB_USER: postgres
+        DB_PASSWORD: postgres
+        DB_NAME: job_tracker_test
+        JWT_ACCESS_SECRET: test-access-secret
+        JWT_REFRESH_SECRET: test-refresh-secret   
+    
+    steps:
+        
+        - uses: actions/checkout@v4
+        
+        - name: Setup Node.js
+          uses: actions/setup-node@v4
+          with:
+            node-version: 20
+            cache: npm
+   
+        - name: Install dependencies
+          run: npm ci
+     
+        - name: Run migrations
+          run: npx knex migrate:latest
+         
+        - name: Run tests
+          run: npm test  
