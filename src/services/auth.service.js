@@ -1,10 +1,9 @@
-const bcrypt = require("bcrypt");
+const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const db = require("../config/database");
 const config = require("../config");
 const { ConflictError, UnauthorizedError } = require("../utils/errors");
 const logger = require("../utils/logger");
-const { access } = require("node:fs");
 
 /*
  * Registers a new user.
@@ -49,7 +48,6 @@ async function login(data) {
   // the stored hash. Returns true/false. Never compares plain text.
   const match = await bcrypt.compare(data.password, user.password_hash);
   if (!match) throw new UnauthorizedError("Invalid email or password");
-
   // jwt.sign creates a token with the user's ID embedded inside.
   // "sub" is a standard JWT field meaning "subject" who this token is for.
   // The secret key is what makes the token unforgeable, only our server knows it.
