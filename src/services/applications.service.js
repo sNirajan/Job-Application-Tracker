@@ -2,7 +2,7 @@ const db = require("../config/database");
 const { NotFoundError, ValidationError } = require("../utils/errors");
 const { canTransition, getNextStatuses } = require("../utils/statusMachine");
 const logger = require("../utils/logger");
-
+const { invalidateStatsCache } = require("./stats.service");
 /*
  * Creates a new job application and logs the initial status event.
  *
@@ -32,9 +32,9 @@ async function createApplication(userId, data) {
   // "show me all creates for Google" by filtering on company field.
   logger.info(
     { userId, applicationId: application.id, company: data.company },
-    "Application created"
+    "Application created",
   );
-
+  await invalidateStatsCache(userId);
   return application;
 }
 
@@ -79,7 +79,10 @@ async function getApplication(userId, applicationId) {
  *
  * All params have defaults set by the Zod schema, so nothing here is undefined.
  */
-async function listApplications(userId, { page, per_page, status, company, sort, order }) {
+async function listApplications(
+  userId,
+  { page, per_page, status, company, sort, order },
+) {
   // Base query - always scoped to this user, always.
   const query = db("applications").where({ user_id: userId });
 
@@ -162,9 +165,9 @@ async function updateApplication(userId, applicationId, data) {
   // "Application updated, fields: ['notes', 'salary_min']"
   logger.info(
     { userId, applicationId, fields: Object.keys(data) },
-    "Application updated"
+    "Application updated",
   );
-
+  await invalidateStatsCache(userId);
   return updated;
 }
 
@@ -188,7 +191,11 @@ async function updateApplication(userId, applicationId, data) {
  * Inside the transaction, we use trx('table') instead of db('table').
  * trx is a special connection that groups everything into one atomic operation.
  */
-async function transitionStatus(userId, applicationId, { status: newStatus, notes }) {
+async function transitionStatus(
+  userId,
+  applicationId,
+  { status: newStatus, notes },
+) {
   // { status: newStatus } renames status to newStatus to avoid confusion
   // with the application's current status we're about to fetch.
   const application = await db("applications")
@@ -204,10 +211,12 @@ async function transitionStatus(userId, applicationId, { status: newStatus, note
   if (!canTransition(application.status, newStatus)) {
     throw new ValidationError(
       `Cannot transition from '${application.status}' to '${newStatus}'`,
-      [{
-        field: "status",
-        message: `Valid transitions from '${application.status}': ${getNextStatuses(application.status).join(", ") || "none (terminal status)"}`,
-      }]
+      [
+        {
+          field: "status",
+          message: `Valid transitions from '${application.status}': ${getNextStatuses(application.status).join(", ") || "none (terminal status)"}`,
+        },
+      ],
     );
   }
 
@@ -224,7 +233,7 @@ async function transitionStatus(userId, applicationId, { status: newStatus, note
     await trx("application_events").insert({
       application_id: applicationId,
       from_status: application.status, // what it WAS
-      to_status: newStatus,            // what it's becoming
+      to_status: newStatus, // what it's becoming
       notes: notes || null,
     });
 
@@ -235,9 +244,9 @@ async function transitionStatus(userId, applicationId, { status: newStatus, note
   // "Application status transitioned, from: wishlist, to: applied"
   logger.info(
     { userId, applicationId, from: application.status, to: newStatus },
-    "Application status transitioned"
+    "Application status transitioned",
   );
-
+  await invalidateStatsCache(userId);
   return updated;
 }
 
@@ -263,6 +272,7 @@ async function deleteApplication(userId, applicationId) {
   }
 
   logger.info({ userId, applicationId }, "Application deleted");
+  await invalidateStatsCache(userId);
 }
 
 /*
@@ -298,5 +308,5 @@ module.exports = {
   updateApplication,
   transitionStatus,
   deleteApplication,
-  getTimeline
+  getTimeline,
 };
