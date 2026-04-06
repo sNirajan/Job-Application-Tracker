@@ -93,4 +93,17 @@ async function refresh(data) {
     throw new UnauthorizedError("Invalid or expired refresh token");
   }
 }
-module.exports = { register, login, refresh };
+
+// Frontend's AuthContext calls this on page load to check if the user is still logged in. Without it, refreshing the page logs user out
+async function getMe(userId) {
+  const user = await db("users")
+    .where({ id: userId })
+    .select("id", "email", "name", "created_at")
+    .first();
+
+  if (!user) {
+    throw new UnauthorizedError("User not found");
+  }
+  return user;
+}
+module.exports = { register, login, refresh, getMe };

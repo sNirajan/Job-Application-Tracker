@@ -3,6 +3,7 @@ const controller = require("../controllers/auth.controller");
 const validate = require("../middleware/validate");
 const rateLimiter = require("../middleware/rateLimiter");
 const { registerSchema, loginSchema, refreshSchema } = require("../validators/auth.schema");
+const auth = require("../middleware/auth");
 
 const router = Router();
 
@@ -23,6 +24,8 @@ const registerLimiter = rateLimiter({
 router.post("/register", registerLimiter, validate(registerSchema), controller.register);
 router.post("/login", loginLimiter, validate(loginSchema), controller.login);
 router.post("/refresh", validate(refreshSchema), controller.refreshToken);
+
+router.get("/me", auth, controller.getMe);
 
 module.exports = router;
 

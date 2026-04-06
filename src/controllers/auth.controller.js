@@ -19,4 +19,12 @@ const refreshToken = asyncHandler(async (req, res) => {
     const token = await authService.refresh(req.validated);
     res.json({ data: token})
 })
-module.exports = { register, login, refreshToken };
+
+const getMe = asyncHandler(async (req, res) => {
+    const user = await authService.getMe(req.userId);
+    res.json({ data: user });
+});
+
+
+
+module.exports = { register, login, refreshToken, getMe };
