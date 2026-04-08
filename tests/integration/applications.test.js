@@ -31,29 +31,35 @@ afterAll(async () => {
 });
 
 // Helper: register + login and return the access token
-// Every test calls this first. Clean, reusable, realistic
-async function getAuthToken() {
-  await request(app).post("/api/v1/auth/register").send({
-    email: "test@test.com",
-    password: "password123",
-    name: "Test User",
-  });
+// Supertest's agent keeps cookies across requests automatically.
 
-  const loginRes = await request(app).post("/api/v1/auth/login").send({
-    email: "test@test.com",
-    password: "password123",
-  });
+async function getAuthAgent() {
+  const agent = request.agent(app);
 
-  return loginRes.body.data.accessToken;
+  await agent
+    .post("/api/v1/auth/register")
+    .set("X-Requested-With", "XMLHttpRequest")
+    .send({
+      email: "test@test.com",
+      password: "password123",
+      name: "Test User",
+    });
+
+  await agent
+    .post("/api/v1/auth/login")
+    .set("X-Requested-With", "XMLHttpRequest")
+    .send({ email: "test@test.com", password: "password123" });
+
+  return agent;
 }
 
 describe("POST /api/v1/applications", () => {
   it("should create an application with valid data", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
-    const res = await request(app)
+    const res = await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google", role: "Junior Developer" });
 
     // Checks status code
@@ -67,21 +73,22 @@ describe("POST /api/v1/applications", () => {
   });
 
   if (
-    ("should reject without a token",
+    ("should reject without authentication",
     async () => {
       const res = await request(app)
         .post("/api/v1/applications")
+        .set("X-Requested-With", "XMLHttpRequest")
         .send({ company: "Google", role: "Junior Developer" });
 
       expect(res.status).toBe(401);
     })
   )
     it("should reject when company is missing", async () => {
-      const token = await getAuthToken();
+      const agent = await getAuthAgent();
 
-      const res = await request(app)
+      const res = await agent
         .post("/api/v1/applications")
-        .set("Authorization", `Bearer ${token}`)
+        .set("X-Requested-With", "XMLHttpRequest")
         .send({ role: "Junior Developer" });
 
       expect(res.status).toBe(422);
@@ -89,10 +96,11 @@ describe("POST /api/v1/applications", () => {
     });
 
   it("should reject when role is missing", async () => {
-    const token = await getAuthToken();
-    const res = await request(app)
+    const agent = await getAuthAgent();
+
+    const res = await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google" });
 
     expect(res.status).toBe(422);
@@ -101,11 +109,9 @@ describe("POST /api/v1/applications", () => {
 
 describe("GET /api/v1/applications", () => {
   it("should return empty array when no applications exist", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
-    const res = await request(app)
-      .get("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`);
+    const res = await agent.get("/api/v1/applications");
 
     expect(res.status).toBe(200);
     expect(res.body.data).toEqual([]);
@@ -113,21 +119,19 @@ describe("GET /api/v1/applications", () => {
   });
 
   it("should return applications with pagination", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
     // Creates two applications
-    await request(app)
+    await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google", role: "Dev" });
-    await request(app)
+    await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Shopify", role: "Dev" });
 
-    const res = await request(app)
-      .get("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`);
+    const res = await agent.get("/api/v1/applications");
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(2);
@@ -136,20 +140,18 @@ describe("GET /api/v1/applications", () => {
   });
 
   it("should filter by status", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
-    await request(app)
+    await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google", role: "Dev", status: "applied" });
-    await request(app)
+    await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Shopify", role: "Dev" }); // defaults to wishlist
 
-    const res = await request(app)
-      .get("/api/v1/applications?status=applied")
-      .set("Authorization", `Bearer ${token}`);
+    const res = await agent.get("/api/v1/applications?status=applied");
 
     expect(res.status).toBe(200);
     expect(res.body.data).toHaveLength(1);
@@ -159,17 +161,15 @@ describe("GET /api/v1/applications", () => {
 
 describe("GET /api/v1/applications/:id", () => {
   it("should return a single application with available transitions", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
     // Creates one, then fetch it
-    const created = await request(app)
+    const created = await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google", role: "Dev" });
 
-    const res = await request(app)
-      .get(`/api/v1/applications/${created.body.data.id}`)
-      .set("Authorization", `Bearer ${token}`);
+    const res = await agent.get(`/api/v1/applications/${created.body.data.id}`);
 
     expect(res.status).toBe(200);
     expect(res.body.data.company).toBe("Google");
@@ -180,11 +180,11 @@ describe("GET /api/v1/applications/:id", () => {
   });
 
   it("should return 404 for non-existent application", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
-    const res = await request(app)
-      .get("/api/v1/applications/00000000-0000-0000-0000-000000000099")
-      .set("Authorization", `Bearer ${token}`);
+    const res = await agent.get(
+      "/api/v1/applications/00000000-0000-0000-0000-000000000099",
+    );
 
     expect(res.status).toBe(404);
     expect(res.body.error.code).toBe("NOT_FOUND");
@@ -193,16 +193,16 @@ describe("GET /api/v1/applications/:id", () => {
 
 describe("PATCH /api/v1/applications/:id/status", () => {
   it("should allow valid status transition", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
-    const created = await request(app)
+    const created = await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google", role: "Dev" });
 
-    const res = await request(app)
+    const res = await agent
       .patch(`/api/v1/applications/${created.body.data.id}/status`)
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ status: "applied", notes: "Submitted resume" });
 
     expect(res.status).toBe(200);
@@ -210,17 +210,17 @@ describe("PATCH /api/v1/applications/:id/status", () => {
   });
 
   it("should block invalid status transition", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
-    const created = await request(app)
+    const created = await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google", role: "Dev" });
 
     // Try to skip from wishlist to offer, state machine should block this
-    const res = await request(app)
+    const res = await agent
       .patch(`/api/v1/applications/${created.body.data.id}/status`)
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ status: "offer" });
 
     expect(res.status).toBe(422);
@@ -228,22 +228,22 @@ describe("PATCH /api/v1/applications/:id/status", () => {
   });
 
   it("should create a timeline event after transition", async () => {
-    const token = await getAuthToken();
+    const agent = await getAuthAgent();
 
-    const created = await request(app)
+    const created = await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google", role: "Dev" });
 
-    await request(app)
+    await agent
       .patch(`/api/v1/applications/${created.body.data.id}/status`)
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ status: "applied" });
 
     // Checks timeline has two events: creation + transition
-    const timeline = await request(app)
+    const timeline = await agent
       .get(`/api/v1/applications/${created.body.data.id}/timeline`)
-      .set("Authorization", `Bearer ${token}`);
+      .set("X-Requested-With", "XMLHttpRequest");
 
     expect(timeline.status).toBe(200);
     expect(timeline.body.data).toHaveLength(2);
@@ -255,22 +255,23 @@ describe("PATCH /api/v1/applications/:id/status", () => {
 
 describe("DELETE /api/v1/applications/:id", () => {
   it("should delete an application", async () => {
-    const token = await getAuthToken();
-    const created = await request(app)
+    const agent = await getAuthAgent();
+    
+    const created = await agent
       .post("/api/v1/applications")
-      .set("Authorization", `Bearer ${token}`)
+      .set("X-Requested-With", "XMLHttpRequest")
       .send({ company: "Google", role: "Dev" });
 
-    const res = await request(app)
+    const res = await agent
       .delete(`/api/v1/applications/${created.body.data.id}`)
-      .set("Authorization", `Bearer ${token}`);
+      .set("X-Requested-With", "XMLHttpRequest");
 
     expect(res.status).toBe(204);
 
     // Verify it's actually gone
-    const check = await request(app)
-      .get(`/api/v1/applications/${created.body.data.id}`)
-      .set("Authorization", `Bearer ${token}`);
+    const check = await agent.get(
+      `/api/v1/applications/${created.body.data.id}`,
+    );
 
     expect(check.status).toBe(404);
   });
