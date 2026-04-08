@@ -5,7 +5,7 @@ const createApplicationSchema = z
   .object({
     company: z.string().min(1, "Company name is required").max(255),
     role: z.string().min(1, "Role is required").max(255),
-    url: z.string().url().optional(),
+    url: z.url().optional(),
     status: z.enum(STATUSES).default("wishlist"),
     salary_min: z.number().int().positive().optional(),
     salary_max: z.number().int().positive().optional(),
@@ -22,7 +22,7 @@ const updateApplicationSchema = z
   .object({
     company: z.string().min(1).max(255).optional(),
     role: z.string().min(1).max(255).optional(),
-    url: z.string().url().optional(),
+    url: z.url().optional(),
     salary_min: z.number().int().positive().optional(),
     salary_max: z.number().int().positive().optional(),
     location: z.string().max(255).optional(),
