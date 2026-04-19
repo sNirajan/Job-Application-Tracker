@@ -27,6 +27,7 @@ const allowedOrigins = [
 ].filter(Boolean);
 
 app.use(helmet());
+app.set("trust proxy", 1); 
 app.use(
   cors({
     origin: allowedOrigins,
