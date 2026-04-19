@@ -10,13 +10,13 @@ const router = Router();
 // Login gets strict rate limiting: 5 attempts per 15 minutes
 const loginLimiter = rateLimiter({
   windowMs: 15 * 60 * 1000, // 15 minutes in milliseconds
-  max: 5,
+  max: 30,
   keyPrefix: "ratelimit:login", // Redis key: "ratelimit:login:192.168.1.1"
 });
 
 const registerLimiter = rateLimiter({
   windowMs: 60 * 60 * 1000, // 1hour
-  max: 5, // 5 registrations per hour per IP
+  max: 30, // 30 registrations per hour per IP, just for testing, in production we might want to lower this
   keyPrefix: "ratelimit:register",
 });
 
