@@ -18,7 +18,6 @@ const app = express();
 
 // --- Global Middleware (runs on EVERY request, in order) ---
 app.use(helmet());
-app.set("trust proxy", 1); 
 
 // Allowed origins for CORS, must be specific, not * with credentials
 const allowedOrigins = [
