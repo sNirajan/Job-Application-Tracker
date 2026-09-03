@@ -1,43 +1,5 @@
-name: CI
-# WHEN it runs?
-# "on push to main" = every time code lands on main
-# "on pull_request to main" = every time someone opens a PR targeting main
-# This is the standard trigger setup.
-# A workflow has "jobs". Each job runs on its own virtual machine.
-# We have one job called "test"
+name: CI/CD
 
-# Which operating system? ubuntu-latest
-
-# Health check: wait until PostgreSQL is actually ready
-# before running tests. Without this, tests might start
-# before the database is accepting connections.
-
-# Environment variables available to all steps below.
-# These are the CI equivalents of our .env file.
-# These are NOT secrets. Test credentials don't need to be hidden.
-# For production deployments, we can use GitHub Secrets instead.
-
-# Steps run in order, top to bottom. If any step fails,
-# all remaining steps are skipped and the job fails.
-
-    # Step 1: Downloads our code onto the virtual machine
-      # actions/checkout is an official github action used
-
-    # Step 2: Installs Node.js
-      # 'cache: npm' saves our node_modules between runs
-      # so npm install doesn't re-download everything every time
-
-    # Step 3: Installs dependencies
-      # "npm ci" is like "npm install" but stricter:
-      # Uses package-lock.json exactly (no version surprises)
-      # It's faster (skips some checks)
-      # It fails if package-lock.json is out of sync with package.json
-
-    # Step 4: Creates the database tables
-
-      # Step 5: Runs all tests
-      # If any test fails, this step fails, the job fails
-      # and the PR gets a red X
 on:
   push:
     branches: [main]
@@ -45,9 +7,11 @@ on:
     branches: [main]
 
 jobs:
+  # -------------------------
+  # CI: test the application
+  # -------------------------
   test:
     runs-on: ubuntu-latest
-   
 
     services:
       postgres:
@@ -56,40 +20,113 @@ jobs:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
           POSTGRES_DB: job_tracker_test
-        ports: 
-            - 5432:5432
-    
+        ports:
+          - 5432:5432
         options: >-
-            --health-cmd pg_isready
-            --health-interval 10s
-            --health-timeout 5s
-            --health-retries 5  
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     env:
-        NODE_ENV: test
-        DB_HOST: localhost
-        DB_PORT: 5432
-        DB_USER: postgres
-        DB_PASSWORD: postgres
-        DB_NAME: job_tracker
-        JWT_ACCESS_SECRET: test-access-secret
-        JWT_REFRESH_SECRET: test-refresh-secret   
-    
+      NODE_ENV: test
+      DB_HOST: localhost
+      DB_PORT: 5432
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      DB_NAME: job_tracker
+      JWT_ACCESS_SECRET: test-access-secret
+      JWT_REFRESH_SECRET: test-refresh-secret
+
     steps:
-        
-        - uses: actions/checkout@v4
-        
-        - name: Setup Node.js
-          uses: actions/setup-node@v4
-          with:
-            node-version: 20
-            cache: npm
-   
-        - name: Install dependencies
-          run: npm ci
-     
-        - name: Run migrations
-          run: npx knex migrate:latest
-         
-        - name: Run tests
-          run: npm test  
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run migrations
+        run: npx knex migrate:latest
+
+      - name: Run tests
+        run: npm test
+
+  # ------------------------------------
+  # CD: deploy only after tests succeed
+  # ------------------------------------
+  deploy:
+    needs: test
+
+    # Never deploy pull requests.
+    # Only deploy actual pushes to main.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    runs-on: ubuntu-latest
+
+    permissions:
+      id-token: write
+      contents: read
+
+    env:
+      AWS_REGION: us-east-2
+      ECR_REPOSITORY: job-tracker-api
+      ECS_CLUSTER: job-tracker-cluster
+      ECS_SERVICE: job-tracker-service
+      ECS_TASK_DEFINITION_FAMILY: job-tracker-task
+      CONTAINER_NAME: job-tracker-api
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v6.2.3
+        with:
+          role-to-assume: arn:aws:iam::889387845542:role/GitHubActionsJobTrackerRole
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Build and push Docker image
+        id: build-image
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+          IMAGE_TAG: ${{ github.sha }}
+        run: |
+          IMAGE_URI=$ECR_REGISTRY/$ECR_REPOSITORY:$IMAGE_TAG
+
+          docker build -t $IMAGE_URI .
+          docker push $IMAGE_URI
+
+          echo "image=$IMAGE_URI" >> "$GITHUB_OUTPUT"
+
+      - name: Download current ECS task definition
+        run: |
+          aws ecs describe-task-definition \
+            --task-definition $ECS_TASK_DEFINITION_FAMILY \
+            --query taskDefinition \
+            > task-definition.json
+
+      - name: Update API container image
+        id: render-task-definition
+        uses: aws-actions/amazon-ecs-render-task-definition@v1
+        with:
+          task-definition: task-definition.json
+          container-name: ${{ env.CONTAINER_NAME }}
+          image: ${{ steps.build-image.outputs.image }}
+
+      - name: Deploy to Amazon ECS
+        uses: aws-actions/amazon-ecs-deploy-task-definition@v2
+        with:
+          task-definition: ${{ steps.render-task-definition.outputs.task-definition }}
+          service: ${{ env.ECS_SERVICE }}
+          cluster: ${{ env.ECS_CLUSTER }}
+          wait-for-service-stability: true
