@@ -11,7 +11,7 @@ WORKDIR /app
 # Docker caches each step. If package.json hasn't changed,
 # Docker reuses the cached node_modules instead of reinstalling.
 # This makes rebuilds fast, seconds instead of minutes.
-COPY package.json package-lock.json ./
+COPY package*.json ./
 
 # Installs production dependencies only. No jest, no eslint.
 # --omit=dev skips devDependencies.
@@ -21,6 +21,16 @@ RUN npm ci --omit=dev
 # This step is separate so changing a line of code
 # doesn't trigger a full npm install.
 COPY . .
+
+RUN mkdir -p /app/certs && \
+    apt-get update && \
+    apt-get install -y --no-install-recommends curl ca-certificates && \
+    curl -o /app/certs/us-east-2-bundle.pem \
+    https://truststore.pki.rds.amazonaws.com/us-east-2/us-east-2-bundle.pem && \
+    rm -rf /var/lib/apt/lists/*
+
+ENV NODE_ENV=production
+ENV NODE_EXTRA_CA_CERTS=/app/certs/us-east-2-bundle.pem
 
 # Tells Docker which port our app listens on.
 # This doesn't actually open the port, it's documentation
