@@ -1,7 +1,9 @@
 # Starts from an official Node.js image.
-# "alpine" is a tiny Linux distribution (50MB vs 900MB for full Ubuntu).
+# "alpine" wass a tiny Linux distribution (50MB vs 900MB for full Ubuntu).
+# slim is a Debian-based image that is smaller than the full Node.js image.
 # Smaller image = faster downloads, less attack surface.
-FROM node:20-alpine
+
+FROM node:24-slim
 
 # Creates a directory inside the container for our code.
 # Everything from here runs inside /app.
@@ -22,6 +24,7 @@ RUN npm ci --omit=dev
 # doesn't trigger a full npm install.
 COPY . .
 
+# For ECS production deployment
 RUN mkdir -p /app/certs && \
     apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates && \
