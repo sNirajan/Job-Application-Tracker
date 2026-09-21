@@ -4,4 +4,4 @@ coverage
 .git
 .github
 tests
-*.log
+*.loguploads

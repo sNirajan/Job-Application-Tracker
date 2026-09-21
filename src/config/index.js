@@ -1,4 +1,5 @@
 require('dotenv').config();
+const path = require('path');
 
 const config = {
   port: parseInt(process.env.PORT, 10) || 3000,
@@ -16,6 +17,14 @@ const config = {
     refreshSecret: process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret',
     accessExpiresIn: process.env.JWT_ACCESS_EXPIRES_IN || '15m',
     refreshExpiresIn: process.env.JWT_REFRESH_EXPIRES_IN || '7d',
+  },
+  // Where uploaded documents are kept: 'local' (disk, for development)
+  // or 's3' (production, credentials come from the ECS task role).
+  storage: {
+    driver: process.env.STORAGE_DRIVER || 'local',
+    localDir: process.env.UPLOAD_DIR || path.join(__dirname, '..', '..', 'uploads'),
+    s3Bucket: process.env.S3_BUCKET,
+    s3Region: process.env.AWS_REGION || 'us-east-2',
   },
   isProduction: process.env.NODE_ENV === 'production',
   isTest: process.env.NODE_ENV === 'test',
