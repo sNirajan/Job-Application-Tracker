@@ -14,7 +14,7 @@ This repository contains the backend only. The frontend lives in a separate proj
 - **Authentication**: register and login with JWT access tokens and rotating refresh tokens in HttpOnly cookies
 - **Dashboard stats**: counts per status, stage-to-stage conversion rates, and applications per week, cached in Redis
 - **Rate limiting**: Redis-backed per-IP limits on login and registration
-- **Documents**: upload a resume or cover letter (PDF, DOC, DOCX up to 5 MB) to each application, stored on disk in development and in Amazon S3 in production
+- **Documents**: upload a resume or cover letter (PDF, DOC, DOCX up to 5 MB) to each application, preview PDFs in the app, and see which resume was sent right on each application in the list, stored on disk in development and in Amazon S3 in production
 - **Contacts**: keep recruiter and interviewer details on each application
 - **Reminders and follow-ups**: set reminders per application, plus automatic suggestions for applications with no update in a week
 
@@ -92,6 +92,8 @@ Every status change writes a row to the `application_events` table (`from_status
 - Files are kept in memory only while being checked (5 MB limit), then handed to storage
 - Storage is swappable behind one interface (`src/storage`): local disk for development and tests, S3 in production
 - In production, downloads redirect to a signed S3 link that expires after 60 seconds, so file bytes never pass through the API
+- PDF previews are fetched through the API with the user's login cookie and shown in the browser's built-in viewer, so they work the same wherever the file is stored. Preview responses carry a strict Content-Security-Policy and are never cached by shared caches
+- The applications list includes each application's newest resume (`latest_resume`), fetched in the same query, so cards show which resume was sent without extra requests
 - Deleting a document or its application also deletes the stored file
 
 ### Follow-up Suggestions
@@ -230,6 +232,7 @@ List query options: `page`, `per_page` (max 100), `status`, `company` (partial, 
 | GET    | `/applications/:id/documents`                        | List documents                                |
 | POST   | `/applications/:id/documents`                        | Upload (multipart: `file`, optional `kind`)   |
 | GET    | `/applications/:id/documents/:documentId/download`   | Download (file, or redirect to signed S3 URL) |
+| GET    | `/applications/:id/documents/:documentId/view`       | PDF bytes for in-app preview (PDF only)       |
 | DELETE | `/applications/:id/documents/:documentId`            | Delete a document and its file                |
 
 `kind` is `resume` (default), `cover_letter`, or `other`.
