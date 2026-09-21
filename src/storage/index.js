@@ -18,11 +18,21 @@
 const config = require("../config");
 const logger = require("../utils/logger");
 
-// Containers lose their disk on every deploy, so local storage in
-// production would silently lose uploaded files.
-if (config.isProduction && config.storage.driver !== "s3") {
+// Refuse to start with a storage setup that would lose files. A failed
+// start is loud (the deploy fails and the old version keeps running);
+// quietly writing resumes to a container's disk is not.
+if (config.isProduction && !process.env.STORAGE_DRIVER) {
+  throw new Error(
+    "STORAGE_DRIVER must be set in production ('s3', or 'local' with a persistent volume)",
+  );
+}
+if (config.storage.driver === "s3" && !config.storage.s3Bucket) {
+  throw new Error("S3_BUCKET must be set when STORAGE_DRIVER is 's3'");
+}
+if (config.isProduction && config.storage.driver === "local") {
   logger.warn(
-    "STORAGE_DRIVER is not 's3' in production. Uploaded files will be lost on redeploy.",
+    { uploadDir: config.storage.localDir },
+    "Using local file storage in production. Make sure this folder is on a persistent volume.",
   );
 }
 
