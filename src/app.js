@@ -11,6 +11,7 @@ const errorHandler = require("./middleware/errorHandler");
 const csrfProtection = require("./middleware/csrf");
 const applicationRoutes = require("./routes/applications.routes");
 const statsRoutes = require("./routes/stats.routes");
+const reminderRoutes = require("./routes/reminders.routes");
 const authRoutes = require("./routes/auth.routes");
 const auth = require("./middleware/auth");
 
@@ -63,6 +64,7 @@ app.use("/api/v1/auth", authRoutes);
 // --- Protected Routes (token required) 
 app.use("/api/v1/applications", auth, applicationRoutes);
 app.use("/api/v1/stats", auth, statsRoutes);
+app.use("/api/v1/reminders", auth, reminderRoutes);
 
 // --- 404 handler ---
 app.use((req, res) => {

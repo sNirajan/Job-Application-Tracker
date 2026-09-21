@@ -3,6 +3,7 @@ const { NotFoundError, ValidationError } = require("../utils/errors");
 const { canTransition, getNextStatuses } = require("../utils/statusMachine");
 const logger = require("../utils/logger");
 const { invalidateStatsCache } = require("./stats.service");
+const { removeStoredFiles } = require("./documents.service");
 /*
  * Creates a new job application and logs the initial status event.
  *
@@ -258,11 +259,19 @@ async function transitionStatus(
  * "not found" is the right response. We don't tell them WHICH case it is
  * because that would leak information ("oh, that ID does exist, just not mine").
  *
- * We don't need to manually delete events, contacts, or reminders because
- * the migration set ON DELETE CASCADE on those foreign keys. Postgres
- * handles the cleanup automatically when the parent application is deleted.
+ * We don't need to manually delete events, contacts, reminders or document
+ * rows because the migrations set ON DELETE CASCADE on those foreign keys.
+ * Postgres handles the cleanup automatically when the parent is deleted.
+ *
+ * The uploaded files themselves live outside the database (disk or S3),
+ * so we grab their keys first and delete them once the rows are gone.
  */
 async function deleteApplication(userId, applicationId) {
+  const documents = await db("application_documents as d")
+    .join("applications as a", "a.id", "d.application_id")
+    .where({ "a.id": applicationId, "a.user_id": userId })
+    .select("d.storage_key");
+
   const deleted = await db("applications")
     .where({ id: applicationId, user_id: userId })
     .del();
@@ -270,6 +279,8 @@ async function deleteApplication(userId, applicationId) {
   if (deleted === 0) {
     throw new NotFoundError("Application not found");
   }
+
+  await removeStoredFiles(documents.map((d) => d.storage_key));
 
   logger.info({ userId, applicationId }, "Application deleted");
   await invalidateStatsCache(userId);
