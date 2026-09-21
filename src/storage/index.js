@@ -6,7 +6,8 @@
  *
  *   save(key, buffer, mimeType)   store a file
  *   remove(key)                   delete a file (missing files are ignored)
- *   sendFile(res, doc)            deliver a file to the browser
+ *   read(key)                     get a file's bytes (used for previews)
+ *   sendFile(res, doc)            send a file to the browser as a download
  *
  * - local: files on disk. Used in development and tests.
  * - s3:    files in an S3 bucket. Used in production. The browser is

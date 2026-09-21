@@ -26,9 +26,19 @@ const download = asyncHandler(async (req, res) => {
   );
 });
 
+// PDF bytes for the in-app preview window
+const view = asyncHandler(async (req, res) => {
+  await documentService.viewDocument(
+    req.userId,
+    req.params.id,
+    req.params.documentId,
+    res,
+  );
+});
+
 const remove = asyncHandler(async (req, res) => {
   await documentService.deleteDocument(req.userId, req.params.id, req.params.documentId);
   res.status(204).send();
 });
 
-module.exports = { list, upload, download, remove };
+module.exports = { list, upload, download, view, remove };

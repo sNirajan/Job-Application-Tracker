@@ -110,11 +110,28 @@ async function listApplications(
   // .limit(per_page)      → LIMIT 20
   // .offset(...)          → OFFSET 0 for page 1, OFFSET 20 for page 2, etc.
   // Formula: offset = (page - 1) * per_page
+  //
+  // latest_resume: the most recently uploaded resume for each application
+  // (or null), so lists and boards can show which resume was sent
+  // without a request per card.
   const applications = await query
     .orderBy(sort, order)
     .limit(per_page)
     .offset((page - 1) * per_page)
-    .select("*");
+    .select(
+      "applications.*",
+      db.raw(`(
+        SELECT json_build_object(
+          'id', d.id,
+          'original_name', d.original_name,
+          'mime_type', d.mime_type
+        )
+        FROM application_documents d
+        WHERE d.application_id = applications.id AND d.kind = 'resume'
+        ORDER BY d.created_at DESC
+        LIMIT 1
+      ) AS latest_resume`),
+    );
 
   // Return data + pagination metadata so the client can render
   // "Showing page 1 of 3 (47 total results)"

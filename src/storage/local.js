@@ -29,12 +29,19 @@ async function remove(key) {
   }
 }
 
+async function read(key) {
+  return fs.readFile(resolveKey(key));
+}
+
 async function sendFile(res, doc) {
   const data = await fs.readFile(resolveKey(doc.storage_key));
   res.setHeader("Content-Type", doc.mime_type);
   res.setHeader("Content-Length", data.length);
   res.setHeader("Content-Disposition", contentDisposition(doc.original_name));
+  // Uploaded files are private to one user, so never cache them in
+  // shared caches (proxies, CDNs).
+  res.setHeader("Cache-Control", "private, no-store");
   res.send(data);
 }
 
-module.exports = { save, remove, sendFile };
+module.exports = { save, remove, read, sendFile };

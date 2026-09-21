@@ -132,3 +132,62 @@ describe("Documents", () => {
     expect(countStoredFiles()).toBe(0);
   });
 });
+
+describe("Document preview and latest resume", () => {
+  it("returns PDF bytes for preview, locked down with a strict CSP", async () => {
+    const agent = await getAuthAgent();
+    const app = await createApplication(agent);
+    const uploaded = await agent
+      .post(`/api/v1/applications/${app.id}/documents`)
+      .set(...XRW)
+      .attach("file", PDF, { filename: "resume.pdf", contentType: "application/pdf" });
+
+    const res = await agent
+      .get(`/api/v1/applications/${app.id}/documents/${uploaded.body.data.id}/view`)
+      .buffer(true);
+
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toBe("application/pdf");
+    expect(res.headers["content-disposition"]).toMatch(/^inline;/);
+    expect(res.headers["content-security-policy"]).toContain("default-src 'none'");
+    expect(Buffer.compare(res.body, PDF)).toBe(0);
+  });
+
+  it("refuses to preview Word files", async () => {
+    const agent = await getAuthAgent();
+    const app = await createApplication(agent);
+    const docx = Buffer.concat([Buffer.from([0x50, 0x4b, 0x03, 0x04]), Buffer.alloc(100)]);
+    const uploaded = await agent
+      .post(`/api/v1/applications/${app.id}/documents`)
+      .set(...XRW)
+      .attach("file", docx, { filename: "resume.docx" });
+    expect(uploaded.status).toBe(201);
+
+    const res = await agent.get(
+      `/api/v1/applications/${app.id}/documents/${uploaded.body.data.id}/view`,
+    );
+    expect(res.status).toBe(422);
+  });
+
+  it("includes the newest resume on each application in the list", async () => {
+    const agent = await getAuthAgent();
+    const withResume = await createApplication(agent, { company: "Has Resume" });
+    await createApplication(agent, { company: "No Resume" });
+
+    const upload = (filename, kind) =>
+      agent
+        .post(`/api/v1/applications/${withResume.id}/documents`)
+        .set(...XRW)
+        .field("kind", kind)
+        .attach("file", PDF, { filename, contentType: "application/pdf" });
+    await upload("Resume_v1.pdf", "resume");
+    await upload("Cover.pdf", "cover_letter");
+    await upload("Resume_v2.pdf", "resume");
+
+    const res = await agent.get("/api/v1/applications");
+    const byCompany = Object.fromEntries(res.body.data.map((a) => [a.company, a]));
+
+    expect(byCompany["Has Resume"].latest_resume.original_name).toBe("Resume_v2.pdf");
+    expect(byCompany["No Resume"].latest_resume).toBeNull();
+  });
+});

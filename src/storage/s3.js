@@ -32,6 +32,11 @@ async function remove(key) {
   await client.send(new DeleteObjectCommand({ Bucket, Key: key }));
 }
 
+async function read(key) {
+  const result = await client.send(new GetObjectCommand({ Bucket, Key: key }));
+  return Buffer.from(await result.Body.transformToByteArray());
+}
+
 async function sendFile(res, doc) {
   const url = await getSignedUrl(
     client,
@@ -46,4 +51,4 @@ async function sendFile(res, doc) {
   res.redirect(302, url);
 }
 
-module.exports = { save, remove, sendFile };
+module.exports = { save, remove, read, sendFile };

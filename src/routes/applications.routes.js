@@ -60,6 +60,7 @@ router.post(
   documents.upload,
 );
 router.get("/:id/documents/:documentId/download", documents.download);
+router.get("/:id/documents/:documentId/view", documents.view);
 router.delete("/:id/documents/:documentId", documents.remove);
 
 module.exports = router;
