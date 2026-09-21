@@ -169,6 +169,17 @@ async function updateApplication(userId, applicationId, data) {
     throw new NotFoundError("Application not found");
   }
 
+  // The schema can only compare the two salaries when both are sent.
+  // Here we check the range the row will actually end up with, so
+  // sending just a new minimum can't go above the saved maximum.
+  const salaryMin = "salary_min" in data ? data.salary_min : existing.salary_min;
+  const salaryMax = "salary_max" in data ? data.salary_max : existing.salary_max;
+  if (salaryMin != null && salaryMax != null && salaryMin > salaryMax) {
+    throw new ValidationError("Validation failed", [
+      { field: "salary_max", message: "Minimum salary can't be more than maximum salary" },
+    ]);
+  }
+
   // ...data spreads only the fields the user sent (Zod stripped everything else).
   // So if they only sent { notes: "Great interview" }, only notes gets updated.
   const [updated] = await db("applications")

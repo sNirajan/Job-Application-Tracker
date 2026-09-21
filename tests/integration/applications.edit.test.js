@@ -66,3 +66,40 @@ describe("Salary limits", () => {
     expect(res.status).toBe(422);
   });
 });
+
+describe("Salary range against saved values", () => {
+  it("rejects a new minimum that is above the saved maximum", async () => {
+    const agent = await getAuthAgent();
+    const app = await createApplication(agent, { salary_min: 60000, salary_max: 70000 });
+
+    const res = await agent
+      .patch(`/api/v1/applications/${app.id}`)
+      .set(...XRW)
+      .send({ salary_min: 90000 });
+
+    expect(res.status).toBe(422);
+    expect(res.body.error.details[0].field).toBe("salary_max");
+  });
+
+  it("allows raising the minimum when the maximum is cleared in the same request", async () => {
+    const agent = await getAuthAgent();
+    const app = await createApplication(agent, { salary_min: 60000, salary_max: 70000 });
+
+    const res = await agent
+      .patch(`/api/v1/applications/${app.id}`)
+      .set(...XRW)
+      .send({ salary_min: 90000, salary_max: null });
+
+    expect(res.status).toBe(200);
+  });
+
+  it("rejects creating an application with minimum above maximum", async () => {
+    const agent = await getAuthAgent();
+    const res = await agent
+      .post("/api/v1/applications")
+      .set(...XRW)
+      .send({ company: "Acme", role: "Dev", salary_min: 90000, salary_max: 70000 });
+
+    expect(res.status).toBe(422);
+  });
+});

@@ -25,7 +25,17 @@ const createApplicationSchema = z
       .regex(/^\d{4}-\d{2}-\d{2}$/, "Date must be YYYY-MM-DD format")
       .optional(),
   })
-  .strip();
+  .strip()
+  .refine(
+    (data) =>
+      data.salary_min == null ||
+      data.salary_max == null ||
+      data.salary_min <= data.salary_max,
+    {
+      message: "Minimum salary can't be more than maximum salary",
+      path: ["salary_max"],
+    },
+  );
 
 // Fields can be sent as null to clear them (e.g. removing a salary).
 const dateString = z
