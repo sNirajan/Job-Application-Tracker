@@ -3,6 +3,7 @@ const { NotFoundError, ValidationError } = require("../utils/errors");
 const { canTransition, getNextStatuses } = require("../utils/statusMachine");
 const logger = require("../utils/logger");
 const { invalidateStatsCache } = require("./stats.service");
+const { removeStoredFiles } = require("./documents.service");
 /*
  * Creates a new job application and logs the initial status event.
  *
@@ -109,11 +110,28 @@ async function listApplications(
   // .limit(per_page)      → LIMIT 20
   // .offset(...)          → OFFSET 0 for page 1, OFFSET 20 for page 2, etc.
   // Formula: offset = (page - 1) * per_page
+  //
+  // latest_resume: the most recently uploaded resume for each application
+  // (or null), so lists and boards can show which resume was sent
+  // without a request per card.
   const applications = await query
     .orderBy(sort, order)
     .limit(per_page)
     .offset((page - 1) * per_page)
-    .select("*");
+    .select(
+      "applications.*",
+      db.raw(`(
+        SELECT json_build_object(
+          'id', d.id,
+          'original_name', d.original_name,
+          'mime_type', d.mime_type
+        )
+        FROM application_documents d
+        WHERE d.application_id = applications.id AND d.kind = 'resume'
+        ORDER BY d.created_at DESC
+        LIMIT 1
+      ) AS latest_resume`),
+    );
 
   // Return data + pagination metadata so the client can render
   // "Showing page 1 of 3 (47 total results)"
@@ -149,6 +167,17 @@ async function updateApplication(userId, applicationId, data) {
 
   if (!existing) {
     throw new NotFoundError("Application not found");
+  }
+
+  // The schema can only compare the two salaries when both are sent.
+  // Here we check the range the row will actually end up with, so
+  // sending just a new minimum can't go above the saved maximum.
+  const salaryMin = "salary_min" in data ? data.salary_min : existing.salary_min;
+  const salaryMax = "salary_max" in data ? data.salary_max : existing.salary_max;
+  if (salaryMin != null && salaryMax != null && salaryMin > salaryMax) {
+    throw new ValidationError("Validation failed", [
+      { field: "salary_max", message: "Minimum salary can't be more than maximum salary" },
+    ]);
   }
 
   // ...data spreads only the fields the user sent (Zod stripped everything else).
@@ -258,11 +287,19 @@ async function transitionStatus(
  * "not found" is the right response. We don't tell them WHICH case it is
  * because that would leak information ("oh, that ID does exist, just not mine").
  *
- * We don't need to manually delete events, contacts, or reminders because
- * the migration set ON DELETE CASCADE on those foreign keys. Postgres
- * handles the cleanup automatically when the parent application is deleted.
+ * We don't need to manually delete events, contacts, reminders or document
+ * rows because the migrations set ON DELETE CASCADE on those foreign keys.
+ * Postgres handles the cleanup automatically when the parent is deleted.
+ *
+ * The uploaded files themselves live outside the database (disk or S3),
+ * so we grab their keys first and delete them once the rows are gone.
  */
 async function deleteApplication(userId, applicationId) {
+  const documents = await db("application_documents as d")
+    .join("applications as a", "a.id", "d.application_id")
+    .where({ "a.id": applicationId, "a.user_id": userId })
+    .select("d.storage_key");
+
   const deleted = await db("applications")
     .where({ id: applicationId, user_id: userId })
     .del();
@@ -270,6 +307,8 @@ async function deleteApplication(userId, applicationId) {
   if (deleted === 0) {
     throw new NotFoundError("Application not found");
   }
+
+  await removeStoredFiles(documents.map((d) => d.storage_key));
 
   logger.info({ userId, applicationId }, "Application deleted");
   await invalidateStatsCache(userId);

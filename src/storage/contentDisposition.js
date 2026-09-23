@@ -1,0 +1,18 @@
+/*
+ * Builds a Content-Disposition header with the file's original name.
+ *
+ * "attachment" makes the browser download the file; "inline" lets it
+ * show the file in the tab (used for PDF previews).
+ *
+ * The plain filename= part is reduced to safe ASCII (old browsers),
+ * and filename*= carries the full UTF-8 name (modern browsers).
+ * Quotes, slashes and control characters are stripped so a crafted
+ * filename can't break the header.
+ */
+function contentDisposition(filename, type = "attachment") {
+  const cleaned = filename.replace(/[\u0000-\u001f\u007f"\\/]/g, "_");
+  const ascii = cleaned.replace(/[^\x20-\x7e]/g, "_");
+  return `${type}; filename="${ascii}"; filename*=UTF-8''${encodeURIComponent(cleaned)}`;
+}
+
+module.exports = { contentDisposition };

@@ -1,0 +1,187 @@
+const crypto = require("crypto");
+const path = require("path");
+const db = require("../config/database");
+const storage = require("../storage");
+const { NotFoundError, ValidationError } = require("../utils/errors");
+const logger = require("../utils/logger");
+const { assertOwnsApplication } = require("./ownership");
+const { contentDisposition } = require("../storage/contentDisposition");
+
+const MAX_DOCUMENTS_PER_APPLICATION = 10;
+
+/*
+ * Works out the real file type from the first bytes of the file
+ * (its "magic number"), not from the name or the browser's claimed type.
+ * Both of those are easy to fake; the bytes are not.
+ *
+ * .docx is a zip file under the hood, so for zip bytes we also require
+ * a .docx extension to avoid accepting any random zip.
+ */
+function detectFileType(buffer, originalName) {
+  const ext = path.extname(originalName).toLowerCase();
+
+  if (buffer.subarray(0, 5).toString("latin1") === "%PDF-") {
+    return { ext: "pdf", mimeType: "application/pdf" };
+  }
+  if (buffer.subarray(0, 4).equals(Buffer.from([0x50, 0x4b, 0x03, 0x04])) && ext === ".docx") {
+    return {
+      ext: "docx",
+      mimeType: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    };
+  }
+  if (buffer.subarray(0, 8).equals(Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1])) && ext === ".doc") {
+    return { ext: "doc", mimeType: "application/msword" };
+  }
+  return null;
+}
+
+// Keep a readable name for display/download, without paths or control chars.
+function cleanOriginalName(name) {
+  const base = path.basename(name).replace(/[\u0000-\u001f\u007f]/g, "").trim();
+  return (base || "document").slice(0, 255);
+}
+
+async function listDocuments(userId, applicationId) {
+  await assertOwnsApplication(userId, applicationId);
+
+  return db("application_documents")
+    .where({ application_id: applicationId })
+    .orderBy("created_at", "desc")
+    .select("id", "application_id", "kind", "original_name", "mime_type", "size_bytes", "created_at");
+}
+
+async function uploadDocument(userId, applicationId, file, { kind }) {
+  await assertOwnsApplication(userId, applicationId);
+
+  if (!file) {
+    throw new ValidationError("No file uploaded", [
+      { field: "file", message: "Choose a file to upload" },
+    ]);
+  }
+
+  const type = detectFileType(file.buffer, file.originalname);
+  if (!type) {
+    throw new ValidationError("Unsupported file type", [
+      { field: "file", message: "Only PDF, DOC and DOCX files are allowed" },
+    ]);
+  }
+
+  const [{ count }] = await db("application_documents")
+    .where({ application_id: applicationId })
+    .count();
+  if (parseInt(count, 10) >= MAX_DOCUMENTS_PER_APPLICATION) {
+    throw new ValidationError("Too many documents", [
+      {
+        field: "file",
+        message: `An application can have at most ${MAX_DOCUMENTS_PER_APPLICATION} documents`,
+      },
+    ]);
+  }
+
+  // The storage key is built only from ids we generate, never from the
+  // uploaded filename, so it can't be used for path tricks.
+  const storageKey = `${userId}/${applicationId}/${crypto.randomUUID()}.${type.ext}`;
+  await storage.save(storageKey, file.buffer, type.mimeType);
+
+  try {
+    const [doc] = await db("application_documents")
+      .insert({
+        application_id: applicationId,
+        kind,
+        original_name: cleanOriginalName(file.originalname),
+        mime_type: type.mimeType,
+        size_bytes: file.size,
+        storage_key: storageKey,
+      })
+      .returning(["id", "application_id", "kind", "original_name", "mime_type", "size_bytes", "created_at"]);
+
+    logger.info({ userId, applicationId, documentId: doc.id, kind }, "Document uploaded");
+    return doc;
+  } catch (err) {
+    // Don't leave an orphan file behind if the database insert failed
+    await storage.remove(storageKey).catch(() => {});
+    throw err;
+  }
+}
+
+async function findDocument(userId, applicationId, documentId) {
+  await assertOwnsApplication(userId, applicationId);
+
+  const doc = await db("application_documents")
+    .where({ id: documentId, application_id: applicationId })
+    .first();
+
+  if (!doc) throw new NotFoundError("Document not found");
+  return doc;
+}
+
+async function sendDocument(userId, applicationId, documentId, res) {
+  const doc = await findDocument(userId, applicationId, documentId);
+  await storage.sendFile(res, doc);
+}
+
+/*
+ * Returns a PDF's bytes so the app can show it in a preview window.
+ *
+ * The file is sent through the API (not via an S3 redirect) so the
+ * frontend can fetch it with the user's login cookie, no matter where
+ * it's stored. Files are small (5 MB max), so this is cheap.
+ *
+ * Only PDFs: browsers have a built-in PDF viewer, and the type was
+ * confirmed from the file's bytes at upload. Word files can't be shown
+ * by browsers and are downloaded instead.
+ */
+async function viewDocument(userId, applicationId, documentId, res) {
+  const doc = await findDocument(userId, applicationId, documentId);
+
+  if (doc.mime_type !== "application/pdf") {
+    throw new ValidationError("Preview is only available for PDF files", [
+      { field: "file", message: "Download Word files to open them" },
+    ]);
+  }
+
+  const data = await storage.read(doc.storage_key);
+
+  res.setHeader("Content-Type", "application/pdf");
+  res.setHeader("Content-Length", data.length);
+  res.setHeader("Content-Disposition", contentDisposition(doc.original_name, "inline"));
+  res.setHeader("Cache-Control", "private, no-store");
+  // If this URL is ever opened directly, the page may load nothing but
+  // the PDF itself and can't be framed by other sites.
+  res.setHeader(
+    "Content-Security-Policy",
+    "default-src 'none'; object-src 'self'; frame-ancestors 'none'",
+  );
+  res.send(data);
+}
+
+async function deleteDocument(userId, applicationId, documentId) {
+  const doc = await findDocument(userId, applicationId, documentId);
+
+  await db("application_documents").where({ id: doc.id }).del();
+  await removeStoredFiles([doc.storage_key]);
+
+  logger.info({ userId, applicationId, documentId }, "Document deleted");
+}
+
+// Best effort: the database row is already gone, so a failed file delete
+// is logged for cleanup instead of failing the request.
+async function removeStoredFiles(storageKeys) {
+  await Promise.all(
+    storageKeys.map((key) =>
+      storage.remove(key).catch((err) => {
+        logger.error({ err: err.message, storageKey: key }, "Failed to delete stored file");
+      }),
+    ),
+  );
+}
+
+module.exports = {
+  listDocuments,
+  uploadDocument,
+  sendDocument,
+  viewDocument,
+  deleteDocument,
+  removeStoredFiles,
+  detectFileType,
+};
