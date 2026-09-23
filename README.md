@@ -2,7 +2,12 @@
 
 A REST API for tracking job applications from wishlist to offer. It enforces valid status changes, keeps a full history of every change, and serves cached dashboard stats. Built with production-style backend practices: layered architecture, secure cookie-based auth, Redis caching and rate limiting, automated tests, and a CI/CD pipeline that deploys to AWS ECS.
 
-This repository contains the backend only. The frontend lives in a separate project.
+This repository contains the backend only. The [frontend](https://github.com/sNirajan/Job-Application-Tracker-Frontend) lives in a separate project.
+
+The app is real and in use, but the reason it exists is to learn AWS deployment
+end to end: from a hand-configured EC2 box to a containerized service that
+deploys itself on a push. The [Deployment](#deployment) section covers how it
+got there and what is still rough.
 
 ---
 
@@ -263,6 +268,50 @@ List query options: `page`, `per_page` (max 100), `status`, `company` (partial, 
 
 ---
 
+## Deployment
+
+```
+GitHub push to main
+        |
+   GitHub Actions  (migrations + tests, then OIDC into AWS)
+        |
+       ECR  (image tagged with the commit SHA)
+        |
+Internet -> Application Load Balancer -> ECS Fargate task
+                                          |- API container
+                                          |- Redis container
+                                                |
+                                          RDS PostgreSQL (private)
+
+SSM Parameter Store -> database URL and JWT secrets
+S3                  -> uploaded documents
+CloudWatch          -> logs, metrics, alarms
+```
+
+How it got here, and why each step:
+
+| Stage | What changed | Why |
+| --- | --- | --- |
+| Manual EC2 | Nginx, PM2, Node, Postgres and Redis on one Ubuntu box | To understand ports, processes and security groups before hiding them behind a platform |
+| RDS | Database moved off the app server, TLS enabled, reachable only from the app's security group | The database should outlive any one server |
+| SSM Parameter Store | Secrets read at startup through an IAM role | Nothing sensitive on disk or in the repository |
+| Docker + ECR | API packaged as an image, tagged by commit | The tested artifact is the deployed artifact, and every deploy is traceable to a commit |
+| ECS Fargate + ALB | Container runs as a managed task behind a load balancer with a `/health` check | Tasks can be replaced without the address changing, and there is no server to patch |
+| GitHub Actions + OIDC | Push to main tests and deploys, with no stored AWS keys | Deploys are repeatable and credentials are short lived |
+
+Security boundaries:
+
+- The internet can reach only the load balancer; the load balancer can reach only the ECS task; only the ECS task can reach the database
+- The deploy role can push an image and update the service, and nothing else
+- The app's task role can read, write and delete objects in one bucket, and nothing else
+
+Known limitations, kept deliberately for a single-user app:
+
+- Redis runs as a sidecar in the same task, so two tasks would mean two separate caches. A shared service such as ElastiCache is the right answer when scaling out
+- The load balancer serves HTTP. The frontend forwards `/api/*` to it so the browser only ever talks HTTPS to the site itself. A custom domain with TLS on the load balancer is the proper fix
+- The rate limiter sees the load balancer's address rather than the visitor's, so the login limit is currently shared
+- Migrations are run as a one-off ECS task rather than as part of the deploy
+
 ## CI/CD
 
 GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request to `main`.
@@ -279,6 +328,15 @@ GitHub Actions (`.github/workflows/ci.yml`) runs on every push and pull request 
 - Builds the Docker image and pushes it to Amazon ECR, tagged with the commit SHA
 - Updates the ECS task definition with the new image
 - Deploys to the ECS service and waits until it is stable
+
+### Running migrations against production
+
+RDS is private, so migrations run from inside the network as a one-off task
+using the same image, subnets and security group as the service:
+
+```bash
+aws ecs run-task   --cluster job-tracker-cluster   --task-definition job-tracker-task   --launch-type FARGATE   --network-configuration "awsvpcConfiguration={subnets=[SUBNET_ID],securityGroups=[SG_ID],assignPublicIp=ENABLED}"   --overrides '{"containerOverrides":[{"name":"job-tracker-api","command":["npx","knex","migrate:latest"]}]}'
+```
 
 ### Enabling S3 uploads in production
 
